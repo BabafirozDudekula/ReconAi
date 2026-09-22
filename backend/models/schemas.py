@@ -2,7 +2,7 @@
 Pydantic schemas for ReconAI API request/response models.
 """
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 
 
@@ -13,10 +13,37 @@ class ReconcileRequest(BaseModel):
     run_id: Optional[str] = None
 
 
+VALID_ACTIONS = {"reviewed", "resolved", "escalated"}
+
+
 class ExceptionActionRequest(BaseModel):
     action: str          # "reviewed" | "resolved" | "escalated"
     reason: Optional[str] = None
     actor: str = "Admin"
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v: str) -> str:
+        v = v.lower().strip()
+        if v not in VALID_ACTIONS:
+            raise ValueError(f"action must be one of: {', '.join(sorted(VALID_ACTIONS))}")
+        return v
+
+    @field_validator("actor")
+    @classmethod
+    def validate_actor(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            return "Admin"
+        return v[:100]  # cap length
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip()[:500]  # cap length
+            return v if v else None
+        return None
 
 
 # ── Output schemas ───────────────────────────────────────────────
@@ -71,6 +98,11 @@ class ReconciliationRecordSchema(BaseModel):
     ai_priority: Optional[str]
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
+    # Action tracking fields
+    action_status: Optional[str] = "OPEN"
+    action_actor: Optional[str] = None
+    action_reason: Optional[str] = None
+    action_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -109,3 +141,12 @@ class ExceptionListResponse(BaseModel):
 class AuditLogResponse(BaseModel):
     total: int
     items: List[AuditLogSchema]
+
+
+class ExceptionSummary(BaseModel):
+    """Action-status breakdown counts for the current run."""
+    total_exceptions: int
+    open: int
+    reviewed: int
+    resolved: int
+    escalated: int

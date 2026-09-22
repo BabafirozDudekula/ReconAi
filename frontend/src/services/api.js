@@ -57,11 +57,16 @@ export const api = {
     const q = new URLSearchParams();
     if (params.runId) q.set('run_id', params.runId);
     if (params.status) q.set('status', params.status);
+    if (params.actionStatus) q.set('action_status', params.actionStatus);
+    if (params.priority) q.set('priority', params.priority);
     if (params.search) q.set('search', params.search);
     if (params.page) q.set('page', params.page);
     if (params.pageSize) q.set('page_size', params.pageSize);
     return request(`/exceptions?${q}`);
   },
+
+  getExceptionSummary: (runId) =>
+    request(`/exceptions/summary${runId ? `?run_id=${runId}` : ''}`),
 
   getExceptionDetail: (id) => request(`/exceptions/${id}`),
 
@@ -79,10 +84,14 @@ export const api = {
     const q = new URLSearchParams();
     if (params.runId) q.set('run_id', params.runId);
     if (params.transactionId) q.set('transaction_id', params.transactionId);
+    if (params.action) q.set('action', params.action);
     if (params.page) q.set('page', params.page);
     if (params.pageSize) q.set('page_size', params.pageSize);
     return request(`/audit?${q}`);
   },
+
+  getAuditForTransaction: (transactionId, page = 1) =>
+    request(`/audit?transaction_id=${encodeURIComponent(transactionId)}&page=${page}&page_size=20`),
 
   // Downloads
   downloadDataset: (name) => `${BASE}/data/download/${name}`,

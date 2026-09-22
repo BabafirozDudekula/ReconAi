@@ -1,13 +1,14 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, GitMerge, AlertTriangle,
-  Brain, ClipboardList, Database, Zap
+  Brain, ClipboardList, Database, Zap, Shield
 } from 'lucide-react';
 
 const NAV_ITEMS = [
   { to: '/dashboard',      icon: LayoutDashboard, label: 'Dashboard'      },
   { to: '/reconciliation', icon: GitMerge,        label: 'Reconciliation' },
   { to: '/exceptions',     icon: AlertTriangle,   label: 'Exceptions'     },
+  { to: '/action-center',  icon: Shield,          label: 'Action Center'  },
   { to: '/ai-insights',    icon: Brain,           label: 'AI Insights'    },
   { to: '/audit',          icon: ClipboardList,   label: 'Audit Log'      },
   { to: '/data',           icon: Database,        label: 'Data'           },

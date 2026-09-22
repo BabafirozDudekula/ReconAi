@@ -11,11 +11,21 @@ const ACTION_COLORS = {
   ESCALATED:          'text-amber-400',
 };
 
+const ACTION_FILTER_TABS = [
+  { value: 'ALL',               label: 'All'           },
+  { value: 'REVIEWED',          label: 'Reviewed'      },
+  { value: 'RESOLVED',          label: 'Resolved'      },
+  { value: 'ESCALATED',         label: 'Escalated'     },
+  { value: 'AI_ANALYSIS',       label: 'AI Analysis'   },
+  { value: 'RECONCILIATION_RUN',label: 'Recon Run'     },
+];
+
 export default function AuditLogPage() {
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [actionFilter, setActionFilter] = useState('ALL');
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 30;
 
@@ -24,6 +34,7 @@ export default function AuditLogPage() {
     try {
       const res = await api.getAuditLog({
         transactionId: search || undefined,
+        action: actionFilter !== 'ALL' ? actionFilter : undefined,
         page,
         pageSize: PAGE_SIZE,
       });
@@ -34,9 +45,12 @@ export default function AuditLogPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, page]);
+  }, [search, actionFilter, page]);
 
   useEffect(() => { load(); }, [load]);
+
+  function handleSearch(e) { setSearch(e.target.value); setPage(1); }
+  function handleActionFilter(v) { setActionFilter(v); setPage(1); }
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -52,16 +66,35 @@ export default function AuditLogPage() {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="glass p-4 flex items-center gap-3">
-        <Search size={14} className="text-slate-500" />
-        <input
-          type="text"
-          placeholder="Search by Transaction ID..."
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1); }}
-          className="flex-1 bg-transparent text-sm text-slate-300 placeholder-slate-600 focus:outline-none"
-        />
+      {/* Filters */}
+      <div className="glass p-4 space-y-3">
+        {/* Search */}
+        <div className="flex items-center gap-3">
+          <Search size={14} className="text-slate-500 shrink-0" />
+          <input
+            type="text"
+            placeholder="Search by Transaction ID..."
+            value={search}
+            onChange={handleSearch}
+            className="flex-1 bg-transparent text-sm text-slate-300 placeholder-slate-600 focus:outline-none"
+          />
+        </div>
+        {/* Action-type tabs */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {ACTION_FILTER_TABS.map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => handleActionFilter(value)}
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+                actionFilter === value
+                  ? 'bg-indigo-600 text-white'
+                  : `bg-[#1a1d2e] border border-[#2d3154] ${ACTION_COLORS[value] || 'text-slate-400'} hover:bg-white/5`
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Table */}
@@ -94,7 +127,7 @@ export default function AuditLogPage() {
                 <tr>
                   <td colSpan={7} className="px-4 py-16 text-center">
                     <ClipboardList size={32} className="text-slate-700 mx-auto mb-3" />
-                    <p className="text-slate-500">No audit entries yet. Run the demo to see activity.</p>
+                    <p className="text-slate-500">No audit entries for the current filters.</p>
                   </td>
                 </tr>
               ) : (

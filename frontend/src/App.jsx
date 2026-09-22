@@ -8,6 +8,7 @@ import ExceptionDetail from './pages/ExceptionDetail';
 import AIInsightsPage from './pages/AIInsightsPage';
 import AuditLogPage from './pages/AuditLogPage';
 import DataPage from './pages/DataPage';
+import ActionCenterPage from './pages/ActionCenterPage';
 
 export default function App() {
   return (
@@ -36,6 +37,7 @@ function AppLayout() {
           <Route path="/ai-insights"    element={<AIInsightsPage />} />
           <Route path="/audit"          element={<AuditLogPage />} />
           <Route path="/data"           element={<DataPage />} />
+          <Route path="/action-center"  element={<ActionCenterPage />} />
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

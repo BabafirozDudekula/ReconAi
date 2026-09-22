@@ -36,6 +36,7 @@ from backend.models.schemas import (
     ExceptionListResponse,
     AuditLogResponse,
     AIAnalysisResult,
+    ExceptionSummary,
 )
 from backend.services.reconciliation_service import (
     run_demo_reconciliation,
@@ -425,28 +426,76 @@ def get_records(
     return ExceptionListResponse(total=total, items=[ReconciliationRecordSchema.model_validate(r) for r in items])
 
 
+@app.get("/api/exceptions/summary", response_model=ExceptionSummary)
+def get_exception_summary(run_id: Optional[str] = None, db: Session = Depends(get_db)):
+    """Return action-status breakdown counts for exceptions.
+    When run_id is provided, scopes to that run.
+    When run_id is omitted (Action Center default), counts across ALL runs.
+    """
+    base = db.query(ReconciliationRecord).filter(
+        ReconciliationRecord.recon_status != "MATCHED",
+    )
+    if run_id:
+        base = base.filter(ReconciliationRecord.run_id == run_id)
+
+    total = base.count()
+    if total == 0:
+        return ExceptionSummary(total_exceptions=0, open=0, reviewed=0, resolved=0, escalated=0)
+
+    def _count(action_val: str) -> int:
+        return base.filter(ReconciliationRecord.action_status == action_val).count()
+
+    # Records that have no action_status yet default to OPEN
+    open_count = base.filter(
+        (ReconciliationRecord.action_status == "OPEN")
+        | (ReconciliationRecord.action_status == None)  # noqa: E711
+    ).count()
+
+    return ExceptionSummary(
+        total_exceptions=total,
+        open=open_count,
+        reviewed=_count("REVIEWED"),
+        resolved=_count("RESOLVED"),
+        escalated=_count("ESCALATED"),
+    )
+
+
 @app.get("/api/exceptions", response_model=ExceptionListResponse)
 def get_exceptions(
     run_id: Optional[str] = None,
     status: Optional[str] = None,
+    action_status: Optional[str] = None,
+    priority: Optional[str] = None,
     search: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    """Get exception records only (non-MATCHED)."""
-    if not run_id:
-        run_id = get_latest_run_id(db)
-    if not run_id:
-        return ExceptionListResponse(total=0, items=[])
-
+    """Get exception records only (non-MATCHED) with optional filtering.
+    When run_id is omitted, returns exceptions across ALL runs (for Action Center).
+    When run_id is provided, scopes to that run only.
+    """
     query = db.query(ReconciliationRecord).filter(
-        ReconciliationRecord.run_id == run_id,
         ReconciliationRecord.recon_status != "MATCHED",
     )
+    if run_id:
+        query = query.filter(ReconciliationRecord.run_id == run_id)
 
     if status and status != "ALL":
         query = query.filter(ReconciliationRecord.recon_status == status)
+
+    if action_status and action_status != "ALL":
+        if action_status == "OPEN":
+            # treat NULL action_status as OPEN for backward compatibility
+            query = query.filter(
+                (ReconciliationRecord.action_status == "OPEN")
+                | (ReconciliationRecord.action_status == None)  # noqa: E711
+            )
+        else:
+            query = query.filter(ReconciliationRecord.action_status == action_status)
+
+    if priority and priority != "ALL":
+        query = query.filter(ReconciliationRecord.ai_priority == priority)
 
     if search:
         search_term = f"%{search}%"
@@ -548,21 +597,30 @@ def take_exception_action(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found.")
 
-    previous_status = record.recon_status
-    action = req.action.lower()
+    previous_action_status = record.action_status or "OPEN"
+    previous_recon_status = record.recon_status
+    action = req.action  # already validated + lowercased by schema
 
+    # Map action → action_status and keep boolean flags in sync
     if action == "reviewed":
         record.is_reviewed = True
+        record.action_status = "REVIEWED"
         new_status = f"{record.recon_status} (Reviewed)"
     elif action == "resolved":
         record.is_reviewed = True
         record.is_resolved = True
+        record.action_status = "RESOLVED"
         new_status = f"{record.recon_status} (Resolved)"
     elif action == "escalated":
+        record.action_status = "ESCALATED"
         new_status = f"{record.recon_status} (Escalated)"
     else:
+        # Guarded by schema validator — should not reach here
         raise HTTPException(status_code=400, detail=f"Unknown action: {req.action}")
 
+    record.action_actor = req.actor
+    record.action_reason = req.reason or f"Exception {action} by {req.actor}."
+    record.action_at = datetime.utcnow()
     record.updated_at = datetime.utcnow()
 
     # Audit log
@@ -572,13 +630,18 @@ def take_exception_action(
         transaction_id=record.transaction_id,
         actor=req.actor,
         action=action.upper(),
-        previous_status=previous_status,
-        new_status=new_status,
-        reason=req.reason or f"Exception {action} by {req.actor}.",
+        previous_status=previous_action_status,
+        new_status=record.action_status,
+        reason=record.action_reason,
     ))
 
     db.commit()
-    return {"status": "ok", "action": action, "transaction_id": record.transaction_id}
+    return {
+        "status": "ok",
+        "action": action,
+        "action_status": record.action_status,
+        "transaction_id": record.transaction_id,
+    }
 
 
 # ════════════════════════════════════════════════════════════════
@@ -589,17 +652,20 @@ def take_exception_action(
 def get_audit_log(
     run_id: Optional[str] = None,
     transaction_id: Optional[str] = None,
+    action: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    """Get paginated audit log entries."""
+    """Get paginated audit log entries with optional filters."""
     query = db.query(AuditLog).order_by(AuditLog.timestamp.desc())
 
     if run_id:
         query = query.filter(AuditLog.run_id == run_id)
     if transaction_id:
         query = query.filter(AuditLog.transaction_id == transaction_id)
+    if action and action != "ALL":
+        query = query.filter(AuditLog.action == action.upper())
 
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()

@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
-  Tooltip, ResponsiveContainer, CartesianGrid, Legend
+  Tooltip, ResponsiveContainer, CartesianGrid
 } from 'recharts';
 import {
   FileText, CheckCircle, AlertTriangle, TrendingUp,
-  DollarSign, RefreshCw, Brain, Play, ExternalLink
+  DollarSign, RefreshCw, Brain, Play, ExternalLink,
+  Shield, Layers
 } from 'lucide-react';
 import MetricCard from '../components/MetricCard';
 import { StatusBadge, formatCurrency, formatDateTime } from '../components/StatusBadge';
@@ -40,18 +41,21 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [metrics, setMetrics] = useState(null);
   const [exceptions, setExceptions] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
 
   const loadData = useCallback(async () => {
     try {
-      const [m, exc] = await Promise.all([
+      const [m, exc, sum] = await Promise.all([
         api.getMetrics(),
         api.getExceptions({ pageSize: 5 }),
+        api.getExceptionSummary(),
       ]);
       setMetrics(m);
       setExceptions(exc.items || []);
+      setSummary(sum);
       setError('');
     } catch (e) {
       setError(e.message);
@@ -243,6 +247,40 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Exception Action Summary */}
+      {summary && (
+        <div className="glass p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Shield size={16} className="text-indigo-400" />
+              <h3 className="text-sm font-semibold text-slate-300">Exception Action Summary</h3>
+            </div>
+            <button
+              onClick={() => navigate('/action-center')}
+              className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+            >
+              Action Center <ExternalLink size={12} />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: 'Open',      value: summary.open,      cls: 'text-amber-400',   bg: 'bg-amber-500/10 border-amber-500/20'   },
+              { label: 'Reviewed',  value: summary.reviewed,  cls: 'text-blue-400',    bg: 'bg-blue-500/10 border-blue-500/20'     },
+              { label: 'Resolved',  value: summary.resolved,  cls: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' },
+              { label: 'Escalated', value: summary.escalated, cls: 'text-rose-400',    bg: 'bg-rose-500/10 border-rose-500/20'     },
+            ].map(({ label, value, cls, bg }) => (
+              <div key={label} className={`rounded-xl border p-4 text-center ${bg}`}>
+                <div className={`text-3xl font-black ${cls}`}>{value}</div>
+                <div className="text-xs text-slate-500 mt-1">{label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 text-xs text-slate-600 text-right">
+            {summary.total_exceptions} total exception{summary.total_exceptions !== 1 ? 's' : ''}
+          </div>
+        </div>
+      )}
 
       {/* AI Summary */}
       {metrics?.ai_summary && (

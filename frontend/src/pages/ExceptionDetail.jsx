@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Brain, CheckCircle, XCircle,
-  AlertTriangle, Clock, RefreshCw, ChevronRight
+  AlertTriangle, Clock, RefreshCw, ChevronRight,
+  Shield, User, MessageSquare, History
 } from 'lucide-react';
-import { StatusBadge, PriorityBadge, formatCurrency, formatDate } from '../components/StatusBadge';
+import { StatusBadge, PriorityBadge, formatCurrency, formatDate, formatDateTime } from '../components/StatusBadge';
 import { api } from '../services/api';
 
 function SourceCard({ title, found, amount, status, extra = [] }) {
@@ -50,6 +51,31 @@ function ConfidenceMeter({ value }) {
   );
 }
 
+const ACTION_STATUS_STYLE = {
+  OPEN:      { cls: 'bg-amber-500/10 border-amber-500/30 text-amber-300',   label: 'Open'      },
+  REVIEWED:  { cls: 'bg-blue-500/10 border-blue-500/30 text-blue-300',      label: 'Reviewed'  },
+  RESOLVED:  { cls: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300', label: 'Resolved' },
+  ESCALATED: { cls: 'bg-rose-500/10 border-rose-500/30 text-rose-300',      label: 'Escalated' },
+};
+
+function ActionStatusChip({ status }) {
+  const cfg = ACTION_STATUS_STYLE[status] || ACTION_STATUS_STYLE['OPEN'];
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold ${cfg.cls}`}>
+      <Shield size={11} />
+      {cfg.label}
+    </span>
+  );
+}
+
+const AUDIT_ACTION_COLORS = {
+  RECONCILIATION_RUN: 'text-indigo-400',
+  AI_ANALYSIS:        'text-violet-400',
+  REVIEWED:           'text-blue-400',
+  RESOLVED:           'text-emerald-400',
+  ESCALATED:          'text-rose-400',
+};
+
 export default function ExceptionDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -59,6 +85,14 @@ export default function ExceptionDetail() {
   const [actionLoading, setActionLoading] = useState('');
   const [error, setError] = useState('');
   const [actionMsg, setActionMsg] = useState('');
+  // Action form state
+  const [actionActor, setActionActor] = useState('Admin');
+  const [actionReason, setActionReason] = useState('');
+  const [showReasonFor, setShowReasonFor] = useState(''); // which button is expanded
+  // Audit history
+  const [auditHistory, setAuditHistory] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   async function loadRecord() {
     try {
@@ -71,7 +105,25 @@ export default function ExceptionDetail() {
     }
   }
 
+  async function loadAuditHistory(txnId) {
+    setAuditLoading(true);
+    try {
+      const res = await api.getAuditForTransaction(txnId);
+      setAuditHistory(res.items || []);
+    } catch {
+      setAuditHistory([]);
+    } finally {
+      setAuditLoading(false);
+    }
+  }
+
   useEffect(() => { loadRecord(); }, [id]);
+
+  useEffect(() => {
+    if (showHistory && record?.transaction_id) {
+      loadAuditHistory(record.transaction_id);
+    }
+  }, [showHistory, record?.transaction_id]);
 
   async function handleAnalyze() {
     setAnalyzing(true);
@@ -88,13 +140,20 @@ export default function ExceptionDetail() {
 
   async function handleAction(action) {
     setActionLoading(action);
+    setActionMsg('');
     setError('');
     try {
-      await api.takeAction(id, action, `Exception ${action} via ReconAI dashboard`);
+      await api.takeAction(id, action, actionReason.trim() || undefined, actionActor.trim() || 'Admin');
       setActionMsg(`Exception marked as ${action}.`);
+      setShowReasonFor('');
+      setActionReason('');
       await loadRecord();
+      // Refresh history if visible
+      if (showHistory && record?.transaction_id) {
+        loadAuditHistory(record.transaction_id);
+      }
     } catch (e) {
-      setError(e.message);
+      setError(e.message || 'Action failed. Please try again.');
     } finally {
       setActionLoading('');
     }
@@ -123,6 +182,7 @@ export default function ExceptionDetail() {
 
   const r = record;
   const hasAI = r.ai_explanation;
+  const currentActionStatus = r.action_status || 'OPEN';
 
   return (
     <div className="max-w-4xl mx-auto space-y-5 animate-fade-in">
@@ -138,10 +198,11 @@ export default function ExceptionDetail() {
       <div className="glass p-6">
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div>
-            <div className="flex items-center gap-3 mb-2">
+            <div className="flex items-center gap-3 mb-2 flex-wrap">
               <span className="font-mono text-2xl font-black text-white">{r.transaction_id}</span>
               <StatusBadge status={r.recon_status} />
               {r.ai_priority && <PriorityBadge priority={r.ai_priority} />}
+              <ActionStatusChip status={currentActionStatus} />
             </div>
             <div className="flex items-center gap-6 text-xs text-slate-400 flex-wrap">
               <span>Customer: <span className="text-slate-200">{r.customer_id || '—'}</span></span>
@@ -155,6 +216,28 @@ export default function ExceptionDetail() {
             <div className="text-xs text-slate-500 mt-1">Gateway Amount</div>
           </div>
         </div>
+
+        {/* Action metadata */}
+        {currentActionStatus !== 'OPEN' && r.action_actor && (
+          <div className="mt-4 pt-4 border-t border-[#2d3154] flex flex-wrap gap-4 text-xs text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <User size={11} className="text-slate-500" />
+              Actor: <span className="text-slate-200 ml-1">{r.action_actor}</span>
+            </span>
+            {r.action_reason && (
+              <span className="flex items-center gap-1.5">
+                <MessageSquare size={11} className="text-slate-500" />
+                Reason: <span className="text-slate-200 ml-1">{r.action_reason}</span>
+              </span>
+            )}
+            {r.action_at && (
+              <span className="flex items-center gap-1.5">
+                <Clock size={11} className="text-slate-500" />
+                At: <span className="text-slate-200 ml-1">{formatDateTime(r.action_at)}</span>
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Match reason */}
         {r.match_reason && (
@@ -280,50 +363,158 @@ export default function ExceptionDetail() {
           </div>
         )}
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={() => handleAction('reviewed')}
-            disabled={!!actionLoading || r.is_reviewed}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 text-sm font-semibold hover:bg-blue-500/30 transition-all disabled:opacity-40"
-          >
-            {actionLoading === 'reviewed' ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <CheckCircle size={14} />
-            )}
-            {r.is_reviewed ? 'Reviewed ✓' : 'Mark as Reviewed'}
-          </button>
-
-          <button
-            onClick={() => handleAction('resolved')}
-            disabled={!!actionLoading || r.is_resolved}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-sm font-semibold hover:bg-emerald-500/30 transition-all disabled:opacity-40"
-          >
-            {actionLoading === 'resolved' ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <CheckCircle size={14} />
-            )}
-            {r.is_resolved ? 'Resolved ✓' : 'Resolve Exception'}
-          </button>
-
-          <button
-            onClick={() => handleAction('escalated')}
-            disabled={!!actionLoading}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 text-sm font-semibold hover:bg-amber-500/30 transition-all disabled:opacity-40"
-          >
-            {actionLoading === 'escalated' ? (
-              <RefreshCw size={14} className="animate-spin" />
-            ) : (
-              <AlertTriangle size={14} />
-            )}
-            Escalate
-          </button>
+        {/* Actor input */}
+        <div className="mb-4 flex items-center gap-3">
+          <User size={13} className="text-slate-500 shrink-0" />
+          <label className="text-xs text-slate-500 shrink-0">Acting as:</label>
+          <input
+            type="text"
+            value={actionActor}
+            onChange={e => setActionActor(e.target.value)}
+            maxLength={100}
+            placeholder="Your name or role"
+            className="flex-1 max-w-xs px-3 py-1.5 bg-[#0f1117] border border-[#2d3154] rounded-lg text-sm text-slate-300 placeholder-slate-600 focus:outline-none focus:border-indigo-500/50"
+          />
         </div>
+
+        {/* Action buttons */}
+        <div className="flex flex-wrap gap-3">
+          {/* Reviewed */}
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => setShowReasonFor(showReasonFor === 'reviewed' ? '' : 'reviewed')}
+              disabled={!!actionLoading || r.is_reviewed}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 text-sm font-semibold hover:bg-blue-500/30 transition-all disabled:opacity-40"
+            >
+              {actionLoading === 'reviewed' ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <CheckCircle size={14} />
+              )}
+              {r.is_reviewed ? 'Reviewed ✓' : 'Mark as Reviewed'}
+            </button>
+          </div>
+
+          {/* Resolved */}
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => setShowReasonFor(showReasonFor === 'resolved' ? '' : 'resolved')}
+              disabled={!!actionLoading || r.is_resolved}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-sm font-semibold hover:bg-emerald-500/30 transition-all disabled:opacity-40"
+            >
+              {actionLoading === 'resolved' ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <CheckCircle size={14} />
+              )}
+              {r.is_resolved ? 'Resolved ✓' : 'Resolve Exception'}
+            </button>
+          </div>
+
+          {/* Escalated */}
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => setShowReasonFor(showReasonFor === 'escalated' ? '' : 'escalated')}
+              disabled={!!actionLoading || currentActionStatus === 'ESCALATED'}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 text-sm font-semibold hover:bg-amber-500/30 transition-all disabled:opacity-40"
+            >
+              {actionLoading === 'escalated' ? (
+                <RefreshCw size={14} className="animate-spin" />
+              ) : (
+                <AlertTriangle size={14} />
+              )}
+              {currentActionStatus === 'ESCALATED' ? 'Escalated ✓' : 'Escalate'}
+            </button>
+          </div>
+        </div>
+
+        {/* Inline reason form */}
+        {showReasonFor && (
+          <div className="mt-4 p-4 rounded-lg bg-[#1a1d2e] border border-[#2d3154] space-y-3">
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <MessageSquare size={12} />
+              <span>Add a reason (optional) for <span className="font-semibold text-slate-200 capitalize">{showReasonFor}</span></span>
+            </div>
+            <textarea
+              value={actionReason}
+              onChange={e => setActionReason(e.target.value)}
+              maxLength={500}
+              rows={2}
+              placeholder="e.g. Confirmed with bank — duplicate settlement detected..."
+              className="w-full px-3 py-2 bg-[#0f1117] border border-[#2d3154] rounded-lg text-sm text-slate-300 placeholder-slate-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+            />
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => handleAction(showReasonFor)}
+                disabled={!!actionLoading}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-all disabled:opacity-50 flex items-center gap-2"
+              >
+                {actionLoading === showReasonFor && <RefreshCw size={13} className="animate-spin" />}
+                Confirm {showReasonFor.charAt(0).toUpperCase() + showReasonFor.slice(1)}
+              </button>
+              <button
+                onClick={() => { setShowReasonFor(''); setActionReason(''); }}
+                className="px-3 py-2 rounded-lg text-slate-400 text-sm hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <span className="text-xs text-slate-600 ml-auto">{actionReason.length}/500</span>
+            </div>
+          </div>
+        )}
 
         <p className="mt-4 text-xs text-slate-600">
           All actions are recorded in the audit log. No automatic financial transactions are made.
         </p>
+      </div>
+
+      {/* Audit History */}
+      <div className="glass p-5">
+        <button
+          onClick={() => setShowHistory(h => !h)}
+          className="flex items-center gap-2 w-full text-left"
+        >
+          <History size={14} className="text-slate-400" />
+          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider flex-1">
+            Audit History
+          </h2>
+          <span className="text-xs text-slate-500">{showHistory ? '▲ Hide' : '▼ Show'}</span>
+        </button>
+
+        {showHistory && (
+          <div className="mt-4">
+            {auditLoading ? (
+              <div className="space-y-2">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="skeleton h-10 rounded" />
+                ))}
+              </div>
+            ) : auditHistory.length === 0 ? (
+              <p className="text-xs text-slate-500 py-4 text-center">No audit entries for this transaction.</p>
+            ) : (
+              <div className="space-y-2">
+                {auditHistory.map(entry => (
+                  <div key={entry.id} className="flex items-start gap-3 p-3 rounded-lg bg-[#1a1d2e] border border-[#2d3154] text-xs">
+                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`font-mono font-semibold ${AUDIT_ACTION_COLORS[entry.action] || 'text-slate-400'}`}>
+                          {entry.action}
+                        </span>
+                        <span className="text-slate-500">by</span>
+                        <span className="text-slate-300 font-semibold">{entry.actor}</span>
+                        <span className="text-slate-600 ml-auto whitespace-nowrap">{formatDateTime(entry.timestamp)}</span>
+                      </div>
+                      {entry.reason && (
+                        <p className="text-slate-500 mt-1 truncate" title={entry.reason}>{entry.reason}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

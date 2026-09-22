@@ -55,6 +55,11 @@ class ReconciliationRecord(Base):
     ai_priority = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # ── Action tracking (added via safe migration in db.py) ──────────
+    action_status = Column(String, default="OPEN", nullable=True)   # OPEN | REVIEWED | RESOLVED | ESCALATED
+    action_actor = Column(String, nullable=True)
+    action_reason = Column(Text, nullable=True)
+    action_at = Column(DateTime, nullable=True)
 
 
 class AuditLog(Base):

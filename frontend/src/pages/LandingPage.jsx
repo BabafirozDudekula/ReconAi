@@ -54,11 +54,7 @@ export default function LandingPage() {
     <div className="min-h-screen flex flex-col">
       {/* Hero */}
       <section className="flex-1 flex flex-col items-center justify-center px-6 py-24 text-center">
-        {/* Badge */}
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-semibold mb-8">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-          TRACK 04 — AI FINANCE CONTROLLER
-        </div>
+
 
         {/* Logo */}
         <div className="flex items-center gap-3 mb-6">
